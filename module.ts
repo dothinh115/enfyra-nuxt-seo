@@ -49,7 +49,8 @@ export default defineNuxtModule<ModuleOptions>({
     },
   },
   setup(options: ModuleOptions, nuxt: any) {
-    const { resolve } = createResolver((import.meta as any).url)
+    const metaUrl = (import.meta as any).url
+    const { resolve } = createResolver(metaUrl)
     
     nuxt.options.runtimeConfig.public = nuxt.options.runtimeConfig.public || {}
     ;(nuxt.options.runtimeConfig.public as any).seo = {
