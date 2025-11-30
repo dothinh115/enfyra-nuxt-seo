@@ -1,144 +1,205 @@
-import { useRuntimeConfig, useSeoMeta, useHead } from '#imports'
+import { useRuntimeConfig, useHead, computed } from '#imports'
 import type { SEOConfig } from '../types'
 
-interface SeoMeta {
-  title?: string
-  description?: string
-  keywords?: string
-  author?: string
-  robots?: {
-    index?: boolean
-    follow?: boolean
-  }
-}
-
-export const useSEO = (config: SEOConfig) => {
+export const useSEO = (config: SEOConfig | (() => SEOConfig)) => {
   const runtimeConfig = useRuntimeConfig()
   const publicConfig = (runtimeConfig.public || {}) as any
   const seoConfig = publicConfig.seo || {}
   
-  const siteUrl = config.url || seoConfig.siteUrl || ''
+  const getConfig = computed(() => {
+    return typeof config === 'function' ? config() : config
+  })
+  
+  const siteUrl = computed(() => getConfig.value.url || seoConfig.siteUrl || '')
   const defaultImage = seoConfig.defaultImage || ''
   const defaultSiteName = seoConfig.siteName || ''
   const defaultLocale = seoConfig.defaultLocale || 'en_US'
   
   const seoEnabled = seoConfig.enabled !== false
   
-  const fullImageUrl = config.image?.startsWith('http')
-    ? config.image
-    : config.image
-      ? `${siteUrl}${config.image.startsWith('/') ? config.image : `/${config.image}`}`
-      : defaultImage
-        ? `${siteUrl}${defaultImage.startsWith('/') ? defaultImage : `/${defaultImage}`}`
-        : ''
-
-  const shouldIndex = seoEnabled && !config.noindex
-  const shouldFollow = seoEnabled && !config.nofollow
-
-  const meta: SeoMeta = {
-    title: config.title,
-    description: config.description,
-    robots: {
-      index: shouldIndex,
-      follow: shouldFollow,
-    },
-  }
-
-  if (config.keywords && config.keywords.length > 0) {
-    meta.keywords = config.keywords.join(', ')
-  }
-
-  if (config.author) {
-    meta.author = config.author
-  }
-
-  const ogTags: Record<string, string> = {
-    'og:title': config.title || '',
-    'og:description': config.description || '',
-    'og:type': config.type || seoConfig?.defaultType || 'website',
-    'og:url': config.canonical || config.url || siteUrl,
-    'og:site_name': config.siteName || defaultSiteName,
-    'og:locale': config.locale || defaultLocale,
-  }
-
-  if (fullImageUrl) {
-    ogTags['og:image'] = fullImageUrl
-    ogTags['og:image:width'] = '1200'
-    ogTags['og:image:height'] = '630'
-    ogTags['og:image:alt'] = config.title || defaultSiteName
-  }
-
-  const twitterTags: Record<string, string> = {
-    'twitter:card': 'summary_large_image',
-    'twitter:title': config.title || '',
-    'twitter:description': config.description || '',
-  }
-
-  if (fullImageUrl) {
-    twitterTags['twitter:image'] = fullImageUrl
-    twitterTags['twitter:image:alt'] = config.title || defaultSiteName
-  }
-
-  const socialConfig = seoConfig.social || {}
-  const twitterConfig = socialConfig.twitter || {}
-  if (twitterConfig.site) {
-    twitterTags['twitter:site'] = twitterConfig.site
-  }
-  if (twitterConfig.creator) {
-    twitterTags['twitter:creator'] = twitterConfig.creator
-  }
-
-  if (config.type === 'article') {
-    if (config.author) {
-      ogTags['article:author'] = config.author
+  const fullImageUrl = computed(() => {
+    const image = getConfig.value.image
+    if (image?.startsWith('http')) return image
+    if (image) {
+      return `${siteUrl.value}${image.startsWith('/') ? image : `/${image}`}`
     }
-    if (config.publishedTime) {
-      ogTags['article:published_time'] = config.publishedTime
+    if (defaultImage) {
+      return `${siteUrl.value}${defaultImage.startsWith('/') ? defaultImage : `/${defaultImage}`}`
     }
-    if (config.modifiedTime) {
-      ogTags['article:modified_time'] = config.modifiedTime
+    return ''
+  })
+
+  const shouldIndex = computed(() => seoEnabled && !getConfig.value.noindex)
+  const shouldFollow = computed(() => seoEnabled && !getConfig.value.nofollow)
+
+  useHead(() => {
+    const currentConfig = getConfig.value
+    const currentSiteUrl = siteUrl.value
+    const currentFullImageUrl = fullImageUrl.value
+    const currentShouldIndex = shouldIndex.value
+    const currentShouldFollow = shouldFollow.value
+
+    const metaArray: Array<{ name?: string; property?: string; content: string }> = [
+      {
+        name: 'description',
+        content: currentConfig.description || '',
+      },
+    ]
+
+    if (currentConfig.keywords && currentConfig.keywords.length > 0) {
+      metaArray.push({
+        name: 'keywords',
+        content: currentConfig.keywords.join(', '),
+      })
     }
-  }
 
-  if (config.alternateLocales && config.alternateLocales.length > 0) {
-    config.alternateLocales.forEach((locale) => {
-      ogTags[`og:locale:alternate`] = locale
+    if (currentConfig.author) {
+      metaArray.push({
+        name: 'author',
+        content: currentConfig.author,
+      })
+    }
+
+    metaArray.push({
+      name: 'robots',
+      content: `${currentShouldIndex ? 'index' : 'noindex'}, ${currentShouldFollow ? 'follow' : 'nofollow'}`,
     })
-  }
 
-  const allMeta: Record<string, any> = {
-    ...meta,
-    ...ogTags,
-    ...twitterTags,
-  }
+    const ogType = currentConfig.type || seoConfig?.defaultType || 'website'
+    const ogUrl = currentConfig.canonical || currentConfig.url || currentSiteUrl
+    const ogSiteName = currentConfig.siteName || defaultSiteName
+    const ogLocale = currentConfig.locale || defaultLocale
 
-  useSeoMeta(allMeta)
+    metaArray.push(
+      { property: 'og:title', content: currentConfig.title || '' },
+      { property: 'og:description', content: currentConfig.description || '' },
+      { property: 'og:type', content: ogType },
+      { property: 'og:url', content: ogUrl },
+      { property: 'og:site_name', content: ogSiteName },
+      { property: 'og:locale', content: ogLocale }
+    )
 
-  if (config.canonical || config.url) {
-    useHead({
-      link: [
-        {
-          rel: 'canonical',
-          href: config.canonical || config.url || siteUrl,
-        },
-      ],
-    })
-  }
+    if (currentFullImageUrl) {
+      metaArray.push(
+        { property: 'og:image', content: currentFullImageUrl },
+        { property: 'og:image:width', content: '1200' },
+        { property: 'og:image:height', content: '630' },
+        { property: 'og:image:alt', content: currentConfig.title || defaultSiteName }
+      )
+    }
 
-  if (config.title) {
-    useHead({
-      title: config.title,
-    })
-  }
+    const twitterCard = 'summary_large_image'
+    metaArray.push(
+      { name: 'twitter:card', content: twitterCard },
+      { name: 'twitter:title', content: currentConfig.title || '' },
+      { name: 'twitter:description', content: currentConfig.description || '' }
+    )
 
-  const safeMeta = JSON.parse(JSON.stringify(allMeta))
-  const safeStructuredData = config.structuredData 
-    ? JSON.parse(JSON.stringify(config.structuredData))
-    : undefined
+    if (currentFullImageUrl) {
+      metaArray.push(
+        { name: 'twitter:image', content: currentFullImageUrl },
+        { name: 'twitter:image:alt', content: currentConfig.title || defaultSiteName }
+      )
+    }
+
+    const socialConfig = seoConfig.social || {}
+    const twitterConfig = socialConfig.twitter || {}
+    if (twitterConfig.site) {
+      metaArray.push({ name: 'twitter:site', content: twitterConfig.site })
+    }
+    if (twitterConfig.creator) {
+      metaArray.push({ name: 'twitter:creator', content: twitterConfig.creator })
+    }
+
+    if (ogType === 'article') {
+      if (currentConfig.author) {
+        metaArray.push({ property: 'article:author', content: currentConfig.author })
+      }
+      if (currentConfig.publishedTime) {
+        metaArray.push({ property: 'article:published_time', content: currentConfig.publishedTime })
+      }
+      if (currentConfig.modifiedTime) {
+        metaArray.push({ property: 'article:modified_time', content: currentConfig.modifiedTime })
+      }
+    }
+
+    if (currentConfig.alternateLocales && currentConfig.alternateLocales.length > 0) {
+      currentConfig.alternateLocales.forEach((locale: string) => {
+        metaArray.push({ property: 'og:locale:alternate', content: locale })
+      })
+    }
+
+    const linkArray = []
+    if (currentConfig.canonical || currentConfig.url) {
+      linkArray.push({
+        rel: 'canonical',
+        href: currentConfig.canonical || currentConfig.url || currentSiteUrl,
+      })
+    }
+
+    const scriptArray = []
+    if (currentConfig.structuredData) {
+      scriptArray.push({
+        type: 'application/ld+json',
+        innerHTML: JSON.stringify(currentConfig.structuredData),
+      })
+    }
+
+    const allMeta: Record<string, any> = {
+      title: currentConfig.title,
+      description: currentConfig.description,
+      keywords: currentConfig.keywords?.join(', '),
+      author: currentConfig.author,
+      robots: {
+        index: currentShouldIndex,
+        follow: currentShouldFollow,
+      },
+      'og:title': currentConfig.title || '',
+      'og:description': currentConfig.description || '',
+      'og:type': ogType,
+      'og:url': ogUrl,
+      'og:site_name': ogSiteName,
+      'og:locale': ogLocale,
+      'twitter:card': twitterCard,
+      'twitter:title': currentConfig.title || '',
+      'twitter:description': currentConfig.description || '',
+    }
+
+    if (currentFullImageUrl) {
+      allMeta['og:image'] = currentFullImageUrl
+      allMeta['og:image:width'] = '1200'
+      allMeta['og:image:height'] = '630'
+      allMeta['og:image:alt'] = currentConfig.title || defaultSiteName
+      allMeta['twitter:image'] = currentFullImageUrl
+      allMeta['twitter:image:alt'] = currentConfig.title || defaultSiteName
+    }
+
+    return {
+      title: currentConfig.title || '',
+      meta: metaArray,
+      link: linkArray.length > 0 ? linkArray : undefined,
+      script: scriptArray.length > 0 ? scriptArray : undefined,
+    }
+  })
+
+  const safeMeta = computed(() => {
+    const currentConfig = getConfig.value
+    return {
+      title: currentConfig.title,
+      description: currentConfig.description,
+      keywords: currentConfig.keywords?.join(', '),
+    }
+  })
+
+  const safeStructuredData = computed(() => {
+    const currentConfig = getConfig.value
+    return currentConfig.structuredData 
+      ? JSON.parse(JSON.stringify(currentConfig.structuredData))
+      : undefined
+  })
 
   return {
-    meta: safeMeta as Record<string, any>,
-    structuredData: safeStructuredData as Record<string, any> | undefined,
+    meta: safeMeta.value as Record<string, any>,
+    structuredData: safeStructuredData.value as Record<string, any> | undefined,
   }
 }
-
