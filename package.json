@@ -1,6 +1,6 @@
 {
   "name": "enfyra-nuxt-seo",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A powerful, configurable SEO module for Nuxt 4",
   "type": "module",
   "main": "./module.ts",

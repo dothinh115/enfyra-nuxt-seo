@@ -165,7 +165,7 @@ const { meta, structuredData } = useSEO({
 
 ### Reactive usage (using `computed` / state)
 
-Both `usePageSEO` và `useSEO` đều có thể nhận **object tĩnh** hoặc **hàm trả về config**, vì vậy bạn có thể dùng reactive state/computed một cách an toàn.
+Both `usePageSEO` and `useSEO` accept either a **plain config object** or a **function that returns a config object**, so you can safely use reactive state/computed values.
 
 ```vue
 <script setup lang="ts">
@@ -175,7 +175,7 @@ const article = computed(() => ({
   image: '/article-og.png',
 }))
 
-// Cách 1: Dùng function để đọc reactive mỗi lần (khuyến nghị)
+// Option 1: Use a function to read reactive values each time (recommended)
 usePageSEO(() => ({
   title: article.value.title,
   description: article.value.description,
@@ -183,7 +183,7 @@ usePageSEO(() => ({
   type: 'article',
 }))
 
-// Cách 2: Dùng trực tiếp trong useSEO
+// Option 2: Use directly with useSEO
 const { meta, structuredData } = useSEO(() => ({
   title: article.value.title,
   description: article.value.description,
