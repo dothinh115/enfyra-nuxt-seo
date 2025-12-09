@@ -33,7 +33,7 @@ export interface ModuleOptions extends Partial<SEOConfig> {
 export default defineNuxtModule<ModuleOptions>({
   meta: {
     name: '@enfyra/nuxt-seo',
-    version: '0.1.12',
+    version: '0.1.14',
     configKey: 'seo',
     compatibility: {
       nuxt: '^4.0.0',
@@ -69,10 +69,12 @@ export default defineNuxtModule<ModuleOptions>({
   setup(options: ModuleOptions, nuxt: any) {
     // When built, import.meta.url points to dist/module.mjs
     // We need to resolve from package root, so go up one level from dist
-    const currentDir = fileURLToPath(new URL('.', import.meta.url))
-    const packageRoot = currentDir.endsWith('/dist/') || currentDir.endsWith('\\dist\\')
-      ? join(currentDir, '..')
-      : dirname(fileURLToPath(import.meta.url))
+    const currentFile = fileURLToPath(import.meta.url)
+    const currentDir = dirname(currentFile)
+    // If we're in dist/, go up to package root
+    const packageRoot = currentDir.endsWith('/dist') || currentDir.endsWith('\\dist')
+      ? dirname(currentDir)
+      : currentDir
     const { resolve } = createResolver(packageRoot)
     
     nuxt.options.runtimeConfig.public = nuxt.options.runtimeConfig.public || {}
@@ -107,12 +109,12 @@ export default defineNuxtModule<ModuleOptions>({
       webmanifest: options.webmanifest || {},
     }
 
-    // Use package name path - Nuxt will resolve from node_modules
-    addImportsDir('@enfyra/nuxt-seo/src/composables')
+    // Resolve from package root to src/composables
+    addImportsDir(resolve('./src/composables'))
     
     nuxt.hook('prepare:types', ({ declarations, references }: any) => {
       references.push({
-        path: '@enfyra/nuxt-seo/src/types/nuxt-imports.d.ts',
+        path: resolve('./src/types/nuxt-imports.d.ts'),
       })
       
       declarations.push(`
@@ -125,7 +127,7 @@ declare global {
 
     nuxt.hook('components:dirs', (dirs: any[]) => {
       dirs.push({
-        path: '@enfyra/nuxt-seo/src/components',
+        path: resolve('./src/components'),
         pathPrefix: false,
         global: false,
       })
