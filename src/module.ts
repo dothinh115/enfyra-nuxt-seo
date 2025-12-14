@@ -159,6 +159,13 @@ declare global {
         route: '/api/og',
         handler: '@enfyra/nuxt-seo/src/server/routes/og.ts',
       })
+      
+      // Add middleware to warm up OG image cache for Facebook crawlers
+      addServerHandler({
+        route: '/**',
+        handler: '@enfyra/nuxt-seo/src/server/middleware/og-warmup.ts',
+        middleware: true,
+      })
     }
   },
 })

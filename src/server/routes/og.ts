@@ -8,7 +8,7 @@ import { defineEventHandler, getQuery, getHeaders, setHeader, createError } from
 import { useRuntimeConfig } from '#imports'
 
 const cacheDir = join(process.cwd(), '.enfyra-og-cache')
-const cacheMap = new Map()
+const cacheMap = new Map<string, { buffer: Buffer; timestamp: number }>()
 
 async function ensureCacheDir() {
   try {
@@ -18,38 +18,44 @@ async function ensureCacheDir() {
   }
 }
 
-function getCacheKey(path, host) {
+function getCacheKey(path: string, host: string): string {
   const key = host ? `${host}${path}` : path
   return createHash('md5').update(key).digest('hex')
 }
 
-async function getCachedImage(cacheKey, cacheTtl, memoryTtl) {
+async function getCachedImage(cacheKey: string, cacheTtl: number, memoryTtl: number): Promise<Buffer | null> {
   const memoryCache = cacheMap.get(cacheKey)
   if (memoryCache && Date.now() - memoryCache.timestamp < memoryTtl) {
     return memoryCache.buffer
   }
 
   try {
-    const cacheFile = join(cacheDir, `${cacheKey}.webp`)
-    const stats = await import('fs/promises').then(m => m.stat(cacheFile))
-    const fileAge = Date.now() - stats.mtimeMs
-    
-    if (fileAge < cacheTtl) {
-      const buffer = await readFile(cacheFile)
-      cacheMap.set(cacheKey, { buffer, timestamp: Date.now() })
-      return buffer
+    const formats = ['webp', 'jpeg', 'png']
+    for (const fmt of formats) {
+      const cacheFile = join(cacheDir, `${cacheKey}.${fmt}`)
+      try {
+        const stats = await import('fs/promises').then(m => m.stat(cacheFile))
+        const fileAge = Date.now() - stats.mtimeMs
+        
+        if (fileAge < cacheTtl) {
+          const buffer = await readFile(cacheFile)
+          cacheMap.set(cacheKey, { buffer, timestamp: Date.now() })
+          return buffer
+        }
+      } catch {
+        continue
+      }
     }
   } catch {
-    // Cache file doesn't exist or error reading
   }
   
   return null
 }
 
-async function saveCachedImage(cacheKey, buffer) {
+async function saveCachedImage(cacheKey: string, buffer: Buffer, format: string = 'webp'): Promise<void> {
   try {
     await ensureCacheDir()
-    const cacheFile = join(cacheDir, `${cacheKey}.webp`)
+    const cacheFile = join(cacheDir, `${cacheKey}.${format}`)
     await writeFile(cacheFile, buffer)
     cacheMap.set(cacheKey, { buffer, timestamp: Date.now() })
   } catch (e) {
@@ -70,11 +76,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const query = getQuery(event)
-  const path = query.path || '/'
+  const path = (typeof query.path === 'string' ? query.path : '/') || '/'
   
   const headers = getHeaders(event)
   const host = headers.host || headers['x-forwarded-host'] || ''
   const protocol = headers['x-forwarded-proto'] || (host.includes('localhost') ? 'http' : 'https')
+  
+  const userAgent = headers['user-agent'] || ''
+  const isFacebookCrawler = userAgent.includes('facebookexternalhit') || 
+                            userAgent.includes('Facebot') ||
+                            userAgent.includes('facebookcatalog')
   
   const isDev = process.env.NODE_ENV === 'development'
   
@@ -90,23 +101,26 @@ export default defineEventHandler(async (event) => {
 
   const viewport = ogImageConfig.viewport || { width: 1440, height: 754 }
   const quality = ogImageConfig.quality || 85
-  const format = ogImageConfig.format || 'webp'
+  const defaultFormat = ogImageConfig.format || 'webp'
+  const format = isFacebookCrawler ? 'jpeg' : defaultFormat
   const cacheTtl = ogImageConfig.cache?.ttl || 24 * 60 * 60 * 1000
   const memoryTtl = ogImageConfig.cache?.memoryTtl || 60 * 60 * 1000
 
-  const cacheKey = getCacheKey(path, host)
+  const cacheKey = `${getCacheKey(path, host)}_${format}`
   const cached = await getCachedImage(cacheKey, cacheTtl, memoryTtl)
   
   if (cached) {
     setHeader(event, 'Content-Type', `image/${format}`)
-    setHeader(event, 'Cache-Control', 'public, max-age=86400, s-maxage=86400')
+    const cacheMaxAge = isFacebookCrawler ? 604800 : 86400
+    setHeader(event, 'Cache-Control', `public, max-age=${cacheMaxAge}, s-maxage=${cacheMaxAge}, immutable`)
+    setHeader(event, 'X-Content-Type-Options', 'nosniff')
     return cached
   }
 
   try {
     const isProduction = process.env.NODE_ENV === 'production'
     
-    let browserOptions = {
+    let browserOptions: { headless: boolean; args: string[]; executablePath?: string } = {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     }
@@ -147,14 +161,16 @@ export default defineEventHandler(async (event) => {
     const page = await browser.newPage()
     
     await page.setViewport({
-      width: viewport.width,
-      height: viewport.height,
+      width: viewport.width || 1440,
+      height: viewport.height || 754,
       deviceScaleFactor: 1,
     })
 
+    const waitTime = isFacebookCrawler ? 2000 : 1000
+    
     await page.goto(targetUrl, {
       waitUntil: 'networkidle0',
-      timeout: 30000,
+      timeout: isFacebookCrawler ? 45000 : 30000,
     })
 
     await page.evaluate(() => {
@@ -174,15 +190,30 @@ export default defineEventHandler(async (event) => {
       document.head.appendChild(style)
     })
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise(resolve => setTimeout(resolve, waitTime))
+    
+    if (isFacebookCrawler) {
+      await page.evaluate(() => {
+        return new Promise((resolve) => {
+          // @ts-ignore
+          if (document.readyState === 'complete') {
+            resolve(true)
+          } else {
+            // @ts-ignore
+            window.addEventListener('load', () => resolve(true), { once: true })
+            setTimeout(() => resolve(true), 1000)
+          }
+        })
+      })
+    }
 
     const screenshot = await page.screenshot({
       type: 'png',
       clip: {
         x: 0,
         y: 0,
-        width: viewport.width,
-        height: viewport.height,
+        width: viewport.width || 1440,
+        height: viewport.height || 754,
       },
     })
 
@@ -196,23 +227,32 @@ export default defineEventHandler(async (event) => {
         .toBuffer()
     } else if (format === 'jpeg') {
       imageBuffer = await sharp(screenshot)
-        .jpeg({ quality })
+        .jpeg({ 
+          quality: isFacebookCrawler ? 92 : quality,
+          mozjpeg: true,
+          progressive: true
+        })
         .toBuffer()
     } else {
       imageBuffer = screenshot
     }
 
-    await saveCachedImage(cacheKey, imageBuffer)
+    await saveCachedImage(cacheKey, Buffer.from(imageBuffer), format)
 
     setHeader(event, 'Content-Type', `image/${format}`)
-    setHeader(event, 'Cache-Control', 'public, max-age=86400, s-maxage=86400')
+    const cacheMaxAge = isFacebookCrawler ? 604800 : 86400
+    setHeader(event, 'Cache-Control', `public, max-age=${cacheMaxAge}, s-maxage=${cacheMaxAge}, immutable`)
+    setHeader(event, 'X-Content-Type-Options', 'nosniff')
+    const etag = createHash('md5').update(imageBuffer).digest('hex')
+    setHeader(event, 'ETag', `"${etag}"`)
 
     return imageBuffer
   } catch (e) {
-    console.error('OG Image capture error:', e.message)
+    const errorMessage = e instanceof Error ? e.message : 'Unknown error'
+    console.error('OG Image capture error:', errorMessage)
     throw createError({
       statusCode: 500,
-      message: `Failed to capture image: ${e.message}`,
+      message: `Failed to capture image: ${errorMessage}`,
     })
   }
 })

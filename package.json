@@ -1,6 +1,6 @@
 {
   "name": "@enfyra/nuxt-seo",
-  "version": "0.1.14",
+  "version": "0.1.16",
   "description": "A powerful, configurable SEO module for Nuxt 4 with automatic OG image generation",
   "type": "module",
   "main": "./dist/module.mjs",
@@ -94,6 +94,7 @@
     "@nuxt/module-builder": "^1.0.2",
     "@nuxt/test-utils": "^3.21.0",
     "@types/node": "^20.0.0",
+    "@types/node-fetch": "^2.6.13",
     "eslint": "^9.39.1",
     "nuxt": "^4.0.0",
     "typescript": "~5.9.3",
